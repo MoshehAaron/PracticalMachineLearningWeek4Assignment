@@ -1,0 +1,220 @@
+---
+output:
+  html_document: default
+  geometry: margin=1cm
+  fontsize: 10pt
+  pdf_document: default
+---
+#Machine Learning Course Project: Prediction Assignment Writeup
+===============================================================
+    
+##0. Background
+
+###     0.1. Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+
+###     0.2. Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. 
+
+The outcome variable is "classe"", a factor variable with 5 levels. For this data set, "participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in 5 different fashions":
+
+- exactly according to the specification (Class A)
+- throwing the elbows to the front (Class B)
+- lifting the dumbbell only halfway (Class C)
+- lowering the dumbbell only halfway (Class D)
+- throwing the hips to the front (Class E)
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes.
+
+
+
+###     0.3. Goal
+
+The goal of this project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases. 
+
+
+
+##1. Data Processing
+
+###     1.1. Load Libraries
+
+```{r}
+library(caret)
+```
+
+
+
+###     1.2. Reproducibility
+
+```{r setoptions, echo=TRUE, results="asis"}
+set.seed(333)
+```
+
+
+
+###     1.3. Load Data
+
+The files are loaded into memory. Missing data (i.e., "NA", "#DIV/0!" and "") are all set to NA so they can be processed.
+
+```{r}
+train.url <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+test.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+path <- paste(getwd(),"/", "Data", sep="")
+
+train.file <- file.path(path, "machine-train-data.csv")
+test.file <- file.path(path, "machine-test-data.csv")
+
+if (!file.exists(train.file)) {
+        download.file(train.url, destfile=train.file)
+}
+if (!file.exists(test.file)) {
+        download.file(test.url, destfile=test.file)
+}
+
+training.data.uncleaned <- read.csv(train.file, na.strings=c("NA","#DIV/0!",""))
+testing.data.uncleaned <- read.csv(test.file, na.strings=c("NA","#DIV/0!",""))
+```
+
+
+
+###     1.4. Clean Data
+
+Some variables are irrelevant to our current project: user_name, raw_timestamp_part_1, raw_timestamp_part_,2 cvtd_timestamp, new_window, and  num_window (columns 1 to 7). We can delete these variables.
+
+```{r}
+training.data.cleaned   <-training.data.uncleaned[,-c(1:7)]
+testing.data.cleaned <-testing.data.uncleaned[,-c(1:7)]
+```
+
+
+
+Now we remove the columns with more than 90% NA of "".
+
+```{r}
+training.treshold <- dim(training.data.cleaned)[1] * 0.9
+
+training.columns.to.Keep<- !apply(training.data.cleaned, 2, function(x) sum(is.na(x)) > training.treshold  || sum(x=="") > training.treshold)
+
+training.data.cleaned <- training.data.cleaned[, training.columns.to.Keep]
+testing.data.cleaned <- testing.data.cleaned[, training.columns.to.Keep]
+```
+
+
+
+We check for near zero variance predictors and drop them if found.
+
+```{r}
+NZV.Columns <- nearZeroVar(training.data.cleaned, saveMetrics = TRUE)
+
+training.data.cleaned <- training.data.cleaned[, NZV.Columns$nzv==FALSE]
+testing.data.cleaned <- testing.data.cleaned[, NZV.Columns$nzv==FALSE]
+```
+
+
+
+###     1.5. Partitioning Data
+
+Let's have a quick look at our datasets.
+
+```{r}
+dim(training.data.cleaned)
+dim(testing.data.cleaned)
+```
+
+The training data set contains 53 variables and 19622 observations.
+The testing data set contains 53 variables and 20 observations.
+In order to perform cross validation, the training data set is partionned into 2 sets. This first is a training set with 70% of the data which is used to train the model. The second (30%) is a validation set used to assess model performance.
+
+The partitioning will be performed using random subsampling without replacement.
+
+```{r}
+subsamples <- createDataPartition(y=training.data.cleaned$classe, p=0.70, list=FALSE)
+training.data.final <- training.data.cleaned[subsamples, ] 
+validation.data.final <- training.data.cleaned[-subsamples, ]
+```
+
+
+##2. Model Development
+
+We will develop 3 different models: Random Forest (RF), GBM and lda.
+
+###     2.1. Random Forest
+
+Train the Model based on the "Random Forest" method and using the training data, use this model to make a prediction for the validation data, and show the Confusion Matrix.
+
+```{r}
+model.RF <- train(classe ~ ., data=training.data.final, method="rf")
+predict.RF<-predict(model.RF, validation.data.final)
+confusionMatrix(predict.RF, validation.data.final$classe)
+```
+
+The "Out-of-Sample Error" is:
+```{r}
+1 - as.numeric(confusionMatrix(validation.data.final$classe, predict.RF)$overall[1])
+```
+
+
+
+###     2.2. GBM
+
+Train the Model based on the "GBM" method and using the training data, use this model to make a prediction for the validation data, and show the Confusion Matrix.
+
+```{r}
+model.GBM <- train(classe ~ ., data=training.data.final, method="gbm", verbose = FALSE)
+predict.GBM<-predict(model.GBM, validation.data.final)
+confusionMatrix(predict.GBM, validation.data.final$classe)
+```
+
+The "Out-of-Sample Error" is:
+```{r}
+1 - as.numeric(confusionMatrix(validation.data.final$classe, predict.GBM)$overall[1])
+```
+
+
+
+###     2.3. lda
+
+Train the Model based on the "lda" method and using the training data, use this model to make a prediction for the validation data, and show the Confusion Matrix.
+
+```{r}
+model.lda <- train(classe ~ ., data=training.data.final, method="lda")
+predict.lda<-predict(model.lda, validation.data.final)
+confusionMatrix(predict.lda, validation.data.final$classe)
+```
+
+The "Out-of-Sample Error" is:
+```{r}
+1 - as.numeric(confusionMatrix(validation.data.final$classe, predict.lda)$overall[1])
+```
+
+
+
+###     2.4. Conclusion
+
+We have to choose which model to apply to the test data.
+
+We choose RF as it has the highest accuracy (99,39%) and lowest out-of=sample error (0,61%) compared to GBM: 96,36% and 3,64% respectively, and lda: 70,74% and 29,26% respectively.
+
+
+
+##3. Prediction
+ 
+ Finally we apply our best model (Random Forest) to the test data.
+
+```{r}
+predict(model.RF, testing.data.cleaned)
+```
+ 
+
